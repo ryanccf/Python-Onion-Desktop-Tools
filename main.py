@@ -38,6 +38,10 @@ from lib.emulator_manager import (
 from lib.wifi_config import (
     get_host_wifi_networks, write_wifi_config, read_wifi_config
 )
+from lib.bios_manager import (
+    BIOS_FILES, download_all_bios, install_bios_to_sd,
+    scan_sd_bios, scan_cached_bios,
+)
 
 APP_NAME = "Onion Installer"
 APP_VERSION = "0.1.0"
@@ -47,8 +51,11 @@ BACKUPS_DIR = APP_DIR / "backups"
 CONFIG_PATH = APP_DIR / "config.json"
 RESOURCES_DIR = APP_DIR / "resources"
 
+BIOS_CACHE_DIR = APP_DIR / "bios_cache"
+
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 BACKUPS_DIR.mkdir(exist_ok=True)
+BIOS_CACHE_DIR.mkdir(exist_ok=True)
 
 
 class DriveSelector(Gtk.Dialog):
@@ -195,6 +202,7 @@ class OnionInstaller(Gtk.Window):
         self._build_config_tab()
         self._build_backup_tab()
         self._build_sdtools_tab()
+        self._build_bios_tab()
         self._build_about_tab()
 
         # Bottom bar with OK and Eject buttons
@@ -363,7 +371,158 @@ class OnionInstaller(Gtk.Window):
 
         self.notebook.append_page(box, Gtk.Label(label="SD Card Tools"))
 
-    # ── Tab 5: About ────────────────────────────────────────────
+    # ── Tab 5: BIOS Manager ──────────────────────────────────────
+
+    def _build_bios_tab(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(15)
+        box.set_margin_bottom(15)
+
+        frame = Gtk.Frame(label="BIOS Manager")
+        frame.set_margin_bottom(10)
+        box.pack_start(frame, True, True, 0)
+
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        inner.set_margin_start(20)
+        inner.set_margin_end(20)
+        inner.set_margin_top(15)
+        inner.set_margin_bottom(15)
+        frame.add(inner)
+
+        desc = Gtk.Label(
+            label="Download and install BIOS files required by emulators.\n"
+                  "Files are cached locally and can be installed to any SD card."
+        )
+        desc.set_halign(Gtk.Align.START)
+        desc.set_line_wrap(True)
+        inner.pack_start(desc, False, False, 0)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        inner.pack_start(sep, False, False, 5)
+
+        self.bios_status_label = Gtk.Label(label="Scanning...")
+        self.bios_status_label.set_halign(Gtk.Align.START)
+        inner.pack_start(self.bios_status_label, False, False, 0)
+
+        self.bios_required_only = Gtk.CheckButton(label="Required BIOS files only")
+        self.bios_required_only.set_active(False)
+        inner.pack_start(self.bios_required_only, False, False, 0)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        btn_box.set_margin_top(10)
+        inner.pack_start(btn_box, False, False, 0)
+
+        dl_btn = Gtk.Button(label="Download All to Cache")
+        dl_btn.connect("clicked", self._on_bios_download)
+        btn_box.pack_start(dl_btn, False, False, 0)
+
+        inst_btn = Gtk.Button(label="Install to SD Card")
+        inst_btn.connect("clicked", self._on_bios_install)
+        btn_box.pack_start(inst_btn, False, False, 0)
+
+        self.notebook.append_page(box, Gtk.Label(label="BIOS Manager"))
+        GLib.idle_add(self._update_bios_status)
+
+    def _update_bios_status(self):
+        cached = scan_cached_bios(BIOS_CACHE_DIR)
+        total_files = len(BIOS_FILES)
+        cached_count = sum(1 for v in cached.values() if v)
+        required_files = [e for e in BIOS_FILES if e["required"]]
+        required_total = len(required_files)
+        required_cached = sum(1 for e in required_files if cached.get(e["filename"], False))
+        self.bios_status_label.set_text(
+            f"Cached: {cached_count}/{total_files} files "
+            f"({required_cached}/{required_total} required)"
+        )
+        return False
+
+    def _on_bios_download(self, button):
+        required_only = self.bios_required_only.get_active()
+        progress = ProgressDialog(self, "Downloading BIOS Files")
+
+        def worker():
+            try:
+                def cb(fraction, text):
+                    GLib.idle_add(progress.set_progress, fraction, text)
+
+                ok, succeeded, failed = download_all_bios(
+                    BIOS_CACHE_DIR, progress_cb=cb,
+                    skip_cached=True, required_only=required_only,
+                )
+
+                GLib.idle_add(progress.set_progress, 1.0, "Done!")
+                GLib.idle_add(self._update_bios_status)
+
+                if ok:
+                    GLib.idle_add(
+                        self._show_success_and_close_progress, progress,
+                        f"Downloaded {len(succeeded)} BIOS files successfully."
+                    )
+                else:
+                    summary = f"Downloaded {len(succeeded)} files.\n\nFailed ({len(failed)}):\n"
+                    summary += "\n".join(failed[:10])
+                    GLib.idle_add(
+                        self._show_error_and_close_progress, progress, summary
+                    )
+            except Exception as e:
+                GLib.idle_add(self._show_error_and_close_progress, progress, str(e))
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+    def _on_bios_install(self, button):
+        # Check that at least some files are cached
+        cached = scan_cached_bios(BIOS_CACHE_DIR)
+        if not any(cached.values()):
+            self._show_message(
+                "No BIOS Files",
+                "No BIOS files found in cache.\nDownload them first using 'Download All to Cache'.",
+                Gtk.MessageType.WARNING,
+            )
+            return
+
+        device, mount_point = self._select_drive()
+        if not device:
+            return
+        if not mount_point:
+            self._show_message("Error", "Could not mount SD card.", Gtk.MessageType.ERROR)
+            return
+
+        required_only = self.bios_required_only.get_active()
+        progress = ProgressDialog(self, "Installing BIOS Files")
+
+        def worker():
+            try:
+                def cb(fraction, text):
+                    GLib.idle_add(progress.set_progress, fraction, text)
+
+                ok, succeeded, failed = install_bios_to_sd(
+                    BIOS_CACHE_DIR, Path(mount_point),
+                    progress_cb=cb, required_only=required_only,
+                )
+
+                GLib.idle_add(progress.set_progress, 1.0, "Done!")
+
+                if ok:
+                    GLib.idle_add(
+                        self._show_success_and_close_progress, progress,
+                        f"Installed {len(succeeded)} BIOS files to SD card."
+                    )
+                else:
+                    summary = f"Installed {len(succeeded)} files.\n\nFailed ({len(failed)}):\n"
+                    summary += "\n".join(failed[:10])
+                    GLib.idle_add(
+                        self._show_error_and_close_progress, progress, summary
+                    )
+            except Exception as e:
+                GLib.idle_add(self._show_error_and_close_progress, progress, str(e))
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+    # ── Tab 6: About ────────────────────────────────────────────
 
     def _build_about_tab(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -417,8 +576,8 @@ class OnionInstaller(Gtk.Window):
     # ── Event Handlers ──────────────────────────────────────────
 
     def _on_tab_changed(self, notebook, page, page_num):
-        # Hide OK button on About tab
-        self.ok_button.set_visible(page_num != 4)
+        # Hide OK button on BIOS tab (has its own buttons) and About tab
+        self.ok_button.set_visible(page_num not in (4, 5))
 
     def _on_ok_clicked(self, button):
         page = self.notebook.get_current_page()
