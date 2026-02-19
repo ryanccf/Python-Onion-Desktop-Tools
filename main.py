@@ -180,7 +180,9 @@ class OnionInstaller(Gtk.Window):
         self.set_resizable(False)
         self.set_position(Gtk.WindowPosition.CENTER)
 
-        icon_path = RESOURCES_DIR / "onion.png"
+        icon_path = APP_DIR / "icon.png"
+        if not icon_path.exists():
+            icon_path = RESOURCES_DIR / "onion.png"
         if icon_path.exists():
             self.set_icon_from_file(str(icon_path))
 

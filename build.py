@@ -87,11 +87,29 @@ def build():
         "--clean",
     ]
 
+    # Application icon
+    icon_path = ROOT / "icon.png"
+    if icon_path.exists():
+        if platform.system() == "Windows":
+            # Convert PNG to ICO for Windows
+            try:
+                from PIL import Image
+                ico_path = ROOT / "icon.ico"
+                img = Image.open(icon_path)
+                img.save(ico_path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
+                cmd += ["--icon", str(ico_path)]
+            except ImportError:
+                print("Warning: Pillow not available, skipping Windows icon")
+        else:
+            cmd += ["--icon", str(icon_path)]
+
     # Bundle data files
     if (ROOT / "config.json").exists():
         cmd += ["--add-data", f"config.json{separator}."]
     if (ROOT / "resources").is_dir():
         cmd += ["--add-data", f"resources{separator}resources"]
+    if icon_path.exists():
+        cmd += ["--add-data", f"icon.png{separator}."]
 
     # Hidden imports for PyGObject/GTK3
     for module in [
