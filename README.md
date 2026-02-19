@@ -1,7 +1,8 @@
 # Linux-Onion-Desktop-Tools
-A Linux port of Onion Desktop Tools written in Python with Claude Code.
 
-This is a version of [Onion Desktop Tools](https://github.com/schmurtzm/Onion-Desktop-Tools/tree/main) written in Python instead of Powershell.
+This is a version of [Onion Desktop Tools](https://github.com/schmurtzm/Onion-Desktop-Tools/tree/main) written in Python (with Claude Code) instead of Powershell.
+
+I also added a tool to download, verify, and install BIOS.
 
 Just run LinuxDesktopTools-x86 to use it.
 
