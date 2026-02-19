@@ -38,8 +38,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OnionInstaller-linux
-          path: releases/OnionInstaller-linux-*
+          name: LinuxOnionDesktopTools
+          path: releases/LinuxOnionDesktopTools-*
 
   build-windows:
     runs-on: windows-latest
@@ -66,8 +66,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OnionInstaller-windows
-          path: releases/OnionInstaller-windows-*
+          name: WindowsOnionDesktopTools
+          path: releases/WindowsOnionDesktopTools-*
 
   release:
     needs: [build-linux, build-windows]

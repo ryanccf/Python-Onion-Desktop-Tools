@@ -62,9 +62,9 @@ def get_output_name():
         machine = "arm64"
 
     if system == "windows":
-        return f"OnionInstaller-windows-{machine}.exe"
+        return f"WindowsOnionDesktopTools-{machine}.exe"
     else:
-        return f"OnionInstaller-{system}-{machine}"
+        return f"LinuxOnionDesktopTools-{machine}"
 
 
 def build():
